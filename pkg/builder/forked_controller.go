@@ -17,6 +17,7 @@ limitations under the License.
 package builder
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -41,6 +42,7 @@ import (
 	mccontroller "sigs.k8s.io/multicluster-runtime/pkg/controller"
 	mchandler "sigs.k8s.io/multicluster-runtime/pkg/handler"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
+	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 	mcsource "sigs.k8s.io/multicluster-runtime/pkg/source"
 )
@@ -64,6 +66,7 @@ type Builder = TypedBuilder[mcreconcile.Request]
 // The workqueue de-duplicates identical requests.
 type TypedBuilder[request mcreconcile.ClusterAware[request]] struct {
 	forInput         ForInput
+	forCluster       ForClusterFilter
 	ownsInput        []OwnsInput
 	rawSources       []source.TypedSource[request]
 	watchesInput     []WatchesInput[request]
@@ -113,6 +116,21 @@ func (blder *TypedBuilder[request]) For(object client.Object, opts ...ForOption)
 	}
 
 	blder.forInput = input
+	return blder
+}
+
+type ForClusterFilter func(ctx context.Context, clusterName string, cl cluster.Cluster) bool
+
+func (blder *TypedBuilder[request]) ForCluster(filter ForClusterFilter) *TypedBuilder[request] {
+	blder.forCluster = filter
+	return blder
+}
+
+func (blder *TypedBuilder[request]) ForProvider(provider multicluster.Provider) *TypedBuilder[request] {
+	blder.forCluster = func(ctx context.Context, clusterName string, cl cluster.Cluster) bool {
+		_, err := provider.Get(ctx, clusterName)
+		return err == nil
+	}
 	return blder
 }
 
