@@ -18,7 +18,9 @@ package multi
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
 
 	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
@@ -32,5 +34,15 @@ type wrappedAware struct {
 }
 
 func (w *wrappedAware) Engage(ctx context.Context, name string, cl cluster.Cluster) error {
+	log, err := logr.FromContext(ctx)
+	if err == nil {
+		log.Info("engaging cluster",
+			"providerName", w.providerName,
+			"clusterName", name,
+			"aware type", fmt.Sprintf("%T", w.Aware),
+			"aware", fmt.Sprintf("%#v", w.Aware),
+			"engage", fmt.Sprintf("%T", w.Aware.Engage),
+		)
+	}
 	return w.Aware.Engage(ctx, w.providerName+w.sep+name, cl)
 }
