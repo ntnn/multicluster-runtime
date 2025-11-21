@@ -117,6 +117,7 @@ func (c *Clusters[T]) Add(ctx context.Context, clusterName string, cl T, aware m
 			defer c.Remove(clusterName)
 			return err
 		}
+		c.LogHandler("engaged cluster", "name", clusterName)
 	}
 
 	go func() {
@@ -138,6 +139,7 @@ func (c *Clusters[T]) Add(ctx context.Context, clusterName string, cl T, aware m
 		}
 	}
 
+	c.LogHandler("added cluster", "name", clusterName)
 	return nil
 }
 

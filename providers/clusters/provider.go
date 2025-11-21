@@ -64,8 +64,8 @@ func New() *Provider {
 	p := new(Provider)
 	p.log = log.Log.WithName("clusters-cluster-provider")
 	p.Clusters = clusters.New[cluster.Cluster]()
-	p.Clusters.ErrorHandler = p.log.Error
-	p.Clusters.LogHandler = p.log.Info
+	p.Clusters.ErrorHandler = p.log.WithName("clusters-clusters").Error
+	p.Clusters.LogHandler = p.log.WithName("clusters-clusters").Info
 	p.waiting = make(map[string]cluster.Cluster)
 	return p
 }
