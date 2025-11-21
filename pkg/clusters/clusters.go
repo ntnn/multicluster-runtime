@@ -41,6 +41,8 @@ type Clusters[T cluster.Cluster] struct {
 	// an error.
 	ErrorHandler func(error, string, ...any)
 
+	LogHandler func(string, ...any)
+
 	// EqualClusters is used to compare two clusters for equality when
 	// adding or replacing clusters.
 	EqualClusters func(a, b T) bool
@@ -88,24 +90,30 @@ func (c *Clusters[T]) GetTyped(_ context.Context, clusterName string) (T, error)
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 
+	c.LogHandler("getting cluster", "name", clusterName)
 	cl, ok := c.clusters[clusterName]
 	if !ok {
+		c.LogHandler("cluster not found", "name", clusterName)
 		return *new(T), fmt.Errorf("cluster with name %s not found: %w", clusterName, multicluster.ErrClusterNotFound)
 	}
 
+	c.LogHandler("cluster found", "name", clusterName)
 	return cl, nil
 }
 
 // Add adds a new cluster.
 // If a cluster with the given name already exists, it returns an error.
 func (c *Clusters[T]) Add(ctx context.Context, clusterName string, cl T, aware multicluster.Aware) error {
+	c.LogHandler("adding cluster", "name", clusterName)
 	ctx, err := c.add(ctx, clusterName, cl)
 	if err != nil {
 		return err
 	}
 
 	if aware != nil {
+		c.LogHandler("engaging cluster", "name", clusterName)
 		if err := aware.Engage(ctx, clusterName, cl); err != nil {
+			c.LogHandler("failed to engage cluster", "name", clusterName, "error", err)
 			defer c.Remove(clusterName)
 			return err
 		}
@@ -113,11 +121,14 @@ func (c *Clusters[T]) Add(ctx context.Context, clusterName string, cl T, aware m
 
 	go func() {
 		defer c.Remove(clusterName)
+		c.LogHandler("starting cluster", "name", clusterName)
 		if err := cl.Start(ctx); err != nil {
+			c.LogHandler("cluster stopped with error", "name", clusterName, "error", err)
 			if c.ErrorHandler != nil {
 				c.ErrorHandler(err, "error in cluster", "name", clusterName)
 			}
 		}
+		c.LogHandler("cluster stopped", "name", clusterName)
 	}()
 
 	for _, index := range c.indexers {
@@ -135,12 +146,14 @@ func (c *Clusters[T]) add(ctx context.Context, clusterName string, cl T) (contex
 	defer c.lock.Unlock()
 
 	if _, exists := c.clusters[clusterName]; exists {
+		c.LogHandler("cluster already exists", "name", clusterName)
 		return nil, fmt.Errorf("cluster with name %s already exists", clusterName)
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
 	c.clusters[clusterName] = cl
 	c.cancels[clusterName] = cancel
+	c.LogHandler("cluster added", "name", clusterName)
 	return ctx, nil
 }
 
@@ -149,7 +162,9 @@ func (c *Clusters[T]) Remove(clusterName string) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
+	c.LogHandler("removing cluster", "name", clusterName)
 	if cancel, ok := c.cancels[clusterName]; ok {
+		c.LogHandler("cancelling cluster context", "name", clusterName)
 		cancel()
 	}
 	delete(c.cancels, clusterName)
@@ -168,6 +183,7 @@ func EqualClusters[T cluster.Cluster](a, b T) bool {
 // configuration as returned by cluster.GetConfig() to compare
 // clusters.
 func (c *Clusters[T]) AddOrReplace(ctx context.Context, clusterName string, cl T, aware multicluster.Aware) error {
+	c.LogHandler("adding or replacing cluster", "name", clusterName)
 	existing, err := c.GetTyped(ctx, clusterName)
 	if err != nil {
 		// Cluster does not exist, add it
@@ -176,6 +192,7 @@ func (c *Clusters[T]) AddOrReplace(ctx context.Context, clusterName string, cl T
 
 	if c.EqualClusters(existing, cl) {
 		// Cluster already exists with the same config, nothing to do
+		c.LogHandler("cluster already exists with the same configuration", "name", clusterName)
 		return nil
 	}
 
