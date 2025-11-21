@@ -36,7 +36,8 @@ type wrappedAware struct {
 func (w *wrappedAware) Engage(ctx context.Context, name string, cl cluster.Cluster) error {
 	log, err := logr.FromContext(ctx)
 	if err == nil {
-		log.Info("engaging cluster",
+		log.Info(
+			"engaging cluster",
 			"providerName", w.providerName,
 			"clusterName", name,
 			"aware type", fmt.Sprintf("%T", w.Aware),
