@@ -108,6 +108,7 @@ func (p *Provider) Start(ctx context.Context, aware multicluster.Aware) error {
 			if err := p.Clusters.AddOrReplace(ctx, it.clusterName, it.cluster, aware); err != nil {
 				p.log.Error(err, "error adding cluster", "clusterName", it.clusterName)
 			}
+			p.log.Info("added cluster to provider", "clusterName", it.clusterName)
 		}
 	}
 }
