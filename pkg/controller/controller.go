@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 
 	"k8s.io/client-go/util/workqueue"
@@ -116,16 +117,17 @@ func (c *mcController[request]) Engage(ctx context.Context, name string, cl clus
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
+	log.Printf("Engaging controller for cluster %q", name)
+
 	// Check if we already have this cluster engaged with the SAME context
 	if old, ok := c.clusters[name]; ok {
 		if old.cluster == cl && old.ctx.Err() == nil {
 			// Same impl, engagement still live → nothing to do
+			log.Printf("Controller already engaged for cluster %q", name)
 			return nil
 		}
 		// Re-engage: either old ctx is done, or impl changed. Stop the old one if still live.
-		if old.ctx.Err() == nil {
-			old.cancel()
-		}
+		old.cancel()
 		delete(c.clusters, name)
 	}
 
@@ -133,6 +135,7 @@ func (c *mcController[request]) Engage(ctx context.Context, name string, cl clus
 
 	// pass through in case the controller itself is cluster aware
 	if ctrl, ok := c.TypedController.(multicluster.Aware); ok {
+		log.Printf("Passing through engagement to cluster aware controller for cluster %q", name)
 		if err := ctrl.Engage(engCtx, name, cl); err != nil {
 			cancel()
 			return err
@@ -140,6 +143,7 @@ func (c *mcController[request]) Engage(ctx context.Context, name string, cl clus
 	}
 
 	// engage cluster aware instances
+	log.Printf("Engaging sources for controller for cluster %q", name)
 	for _, aware := range c.sources {
 		src, err := aware.ForCluster(name, cl)
 		if err != nil {
@@ -152,6 +156,7 @@ func (c *mcController[request]) Engage(ctx context.Context, name string, cl clus
 		}
 	}
 
+	log.Printf("Controller successfully engaged for cluster %q", name)
 	ec := &engagedCluster{
 		name:    name,
 		cluster: cl,
@@ -159,15 +164,17 @@ func (c *mcController[request]) Engage(ctx context.Context, name string, cl clus
 		cancel:  cancel,
 	}
 	c.clusters[name] = ec
-	go func(ctx context.Context, key string, token *engagedCluster) {
-		<-ctx.Done()
+	go func(token *engagedCluster) {
+		log.Printf("Controller monitoring engagement for cluster %q", name)
+		<-token.ctx.Done()
 		c.lock.Lock()
 		defer c.lock.Unlock()
-		if cur, ok := c.clusters[key]; ok && cur == token {
-			delete(c.clusters, key)
+		log.Printf("Controller disengaging for cluster %q", name)
+		if cur, ok := c.clusters[token.name]; ok && cur == token {
+			delete(c.clusters, token.name)
 		}
 		// note: cancel() is driven by parent; no need to call here
-	}(engCtx, name, ec)
+	}(ec)
 
 	return nil
 }

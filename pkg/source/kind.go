@@ -121,30 +121,30 @@ func (ck *clusterKind[object, request]) WaitForSync(ctx context.Context) error {
 
 // Start registers a removable handler on the (scoped) informer and removes it on ctx.Done().
 func (ck *clusterKind[object, request]) Start(ctx context.Context, q workqueue.TypedRateLimitingInterface[request]) error {
-	log := log.FromContext(ctx).WithValues("cluster", ck.clusterName, "source", "kind")
+	log := log.FromContext(ctx).WithValues("cluster", ck.clusterName, "source", "kind", "gvk", ck.obj.GetObjectKind().GroupVersionKind())
+
+	log.Info("starting kind source handler")
 
 	// Check if we're already started with this context
 	ck.mu.Lock()
+	defer ck.mu.Unlock()
+
 	if ck.registration != nil && ck.activeCtx != nil {
+		log.Info("handler already registered, checking context")
 		// Check if the active context is still valid
-		select {
-		case <-ck.activeCtx.Done():
-			// Previous context cancelled, need to clean up and re-register
-			log.V(1).Info("previous context cancelled, cleaning up for re-registration")
-			// Clean up old registration is handled below
-		default:
-			// Still active with same context - check if it's the same context
+		if ck.activeCtx.Err() == nil {
+			log.Info("handler registration still active")
+			// Still active - check if it's the same context
 			if ck.activeCtx == ctx {
-				ck.mu.Unlock()
-				log.V(1).Info("handler already registered with same context")
+				log.Info("handler already registered with same context")
 				return nil
 			}
 			// Different context but old one still active - this shouldn't happen
-			log.V(1).Info("different context while old one active, will re-register")
+			log.Info("different context while old one active, will re-register")
 		}
 	}
-	ck.mu.Unlock()
 
+	log.Info("getting informer for kind")
 	inf, err := ck.getInformer(ctx, ck.obj)
 	if err != nil {
 		log.Error(err, "get informer failed")
@@ -152,16 +152,14 @@ func (ck *clusterKind[object, request]) Start(ctx context.Context, q workqueue.T
 	}
 
 	// If there's an old registration, remove it first
-	ck.mu.Lock()
 	if ck.registration != nil {
-		log.V(1).Info("removing old event handler registration")
+		log.Info("removing old event handler registration")
 		if err := inf.RemoveEventHandler(ck.registration); err != nil {
 			log.Error(err, "failed to remove old event handler")
 		}
 		ck.registration = nil
 		ck.activeCtx = nil
 	}
-	ck.mu.Unlock()
 
 	// predicate helpers
 	passCreate := func(e event.TypedCreateEvent[object]) bool {
@@ -206,6 +204,7 @@ func (ck *clusterKind[object, request]) Start(ctx context.Context, q workqueue.T
 			if ctx.Err() != nil {
 				return
 			}
+			log.Info("Add event received")
 			if o, ok := i.(client.Object); ok {
 				e := makeCreate(o)
 				if passCreate(e) {
@@ -217,6 +216,7 @@ func (ck *clusterKind[object, request]) Start(ctx context.Context, q workqueue.T
 			if ctx.Err() != nil {
 				return
 			}
+			log.Info("Update event received")
 			ooObj, ok1 := oo.(client.Object)
 			noObj, ok2 := no.(client.Object)
 			if ok1 && ok2 {
@@ -230,6 +230,7 @@ func (ck *clusterKind[object, request]) Start(ctx context.Context, q workqueue.T
 			if ctx.Err() != nil {
 				return
 			}
+			log.Info("Delete event received")
 			// be robust to tombstones (provider should already unwrap)
 			if ts, ok := i.(toolscache.DeletedFinalStateUnknown); ok {
 				i = ts.Obj
@@ -244,6 +245,7 @@ func (ck *clusterKind[object, request]) Start(ctx context.Context, q workqueue.T
 	}
 
 	// Register via removable API.
+	log.Info("adding event handler with resync period", "resync", ck.resync)
 	reg, addErr := inf.AddEventHandlerWithResyncPeriod(h, ck.resync)
 	if addErr != nil {
 		log.Error(addErr, "AddEventHandlerWithResyncPeriod failed")
@@ -251,30 +253,29 @@ func (ck *clusterKind[object, request]) Start(ctx context.Context, q workqueue.T
 	}
 
 	// Store registration and context
-	ck.mu.Lock()
 	ck.registration = reg
 	ck.activeCtx = ctx
-	ck.mu.Unlock()
 
-	log.V(1).Info("kind source handler registered", "hasRegistration", reg != nil)
+	log.Info("kind source handler registered", "hasRegistration", reg != nil)
 
 	// Defensive: ensure cache is synced.
+	log.Info("waiting for kind source cache to sync")
 	if !ck.cl.GetCache().WaitForCacheSync(ctx) {
-		ck.mu.Lock()
 		_ = inf.RemoveEventHandler(ck.registration)
 		ck.registration = nil
 		ck.activeCtx = nil
-		ck.mu.Unlock()
-		log.V(1).Info("cache not synced; handler removed")
+		log.Info("cache not synced; handler removed")
 		return ctx.Err()
 	}
-	log.V(1).Info("kind source cache synced")
+	log.Info("kind source cache synced")
 
 	// Wait for context cancellation in a goroutine
 	go func() {
 		<-ctx.Done()
 		ck.mu.Lock()
 		defer ck.mu.Unlock()
+
+		log.Info("context cancelled, removing kind source handler")
 
 		// Only remove if this is still our active registration
 		if ck.activeCtx == ctx && ck.registration != nil {
@@ -283,7 +284,7 @@ func (ck *clusterKind[object, request]) Start(ctx context.Context, q workqueue.T
 			}
 			ck.registration = nil
 			ck.activeCtx = nil
-			log.V(1).Info("kind source handler removed due to context cancellation")
+			log.Info("kind source handler removed due to context cancellation")
 		}
 	}()
 
