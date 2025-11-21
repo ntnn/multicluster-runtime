@@ -18,6 +18,7 @@ package source
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -260,13 +261,33 @@ func (ck *clusterKind[object, request]) Start(ctx context.Context, q workqueue.T
 
 	// Defensive: ensure cache is synced.
 	log.Info("waiting for kind source cache to sync")
-	if !ck.cl.GetCache().WaitForCacheSync(ctx) {
-		_ = inf.RemoveEventHandler(ck.registration)
-		ck.registration = nil
-		ck.activeCtx = nil
-		log.Info("cache not synced; handler removed")
-		return ctx.Err()
+	cache := ck.cl.GetCache()
+	if cache == nil {
+		return fmt.Errorf("cluster cache is nil")
 	}
+	log.Info("cluster cache", "cache", cache)
+
+	go func() {
+		for !inf.HasSynced() {
+			log.Info("cluster informer not synced yet, waiting")
+			time.Sleep(1 * time.Second)
+		}
+		log.Info("cluster informer synced")
+	}()
+
+	// for !inf.HasSynced() {
+	// 	log.Info("cluster informer not synced yet, waiting")
+	// 	time.Sleep(1 * time.Second)
+	// }
+
+	// if !cache.WaitForCacheSync(ctx) {
+	// 	_ = inf.RemoveEventHandler(ck.registration)
+	// 	ck.registration = nil
+	// 	ck.activeCtx = nil
+	// 	log.Info("cache not synced; handler removed")
+	// 	return ctx.Err()
+	// }
+
 	log.Info("kind source cache synced")
 
 	// Wait for context cancellation in a goroutine
