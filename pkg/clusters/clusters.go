@@ -112,8 +112,9 @@ func (c *Clusters[T]) Add(ctx context.Context, clusterName string, cl T, aware m
 
 	if aware != nil {
 		c.LogHandler("engaging cluster", "name", clusterName,
+			"aware type", fmt.Sprintf("%T", aware),
 			"aware", fmt.Sprintf("%#v", aware),
-			"engage", fmt.Sprintf("%#v", aware.Enage),
+			"engage", fmt.Sprintf("%#v", aware.Engage),
 		)
 		if err := aware.Engage(ctx, clusterName, cl); err != nil {
 			c.LogHandler("failed to engage cluster", "name", clusterName, "error", err)
